@@ -8,6 +8,8 @@ export default (browser) => ({
       ? {
           gecko: {
             id: "faceit-to-scl@extension",
+            update_url: "https://raw.githubusercontent.com/ShirZo1k/faceit-to-scl-extension/master/updates.json",
+            data_collection_permissions: [],
           },
         }
       : undefined,

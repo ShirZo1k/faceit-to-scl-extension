@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "faceit-to-scl@extension": {
+      "updates": [
+        {
+          "version": "0.1.0",
+          "update_link": "https://github.com/ShirZo1k/faceit-to-scl-extension/releases/download/v0.1.0/faceit-to-scl-firefox-v0.1.0.xpi"
+        }
+      ]
+    }
+  }
+}
