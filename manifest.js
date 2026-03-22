@@ -70,5 +70,12 @@ export default (browser) => ({
     browser === "chrome"
       ? ["storage", "cookies"]
       : ["storage", "cookies"],
-  host_permissions: ["<all_urls>"],
+  host_permissions: [
+    "*://*.scl.gg/*",
+    "*://storage.scl.gg/*",
+    "*://*.faceit.com/*",
+    "*://*.faceit-cdn.net/*",
+    "*://*.backblazeb2.com/*",
+    "*://*.cloudflarestorage.com/*",
+  ],
 });
