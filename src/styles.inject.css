@@ -1,0 +1,9 @@
+@config "../tailwind.inject.config.js";
+
+@theme {
+  --color-scl: #0BAEEA;
+  --drop-shadow-glow: 0 0 4px var(--color-scl);
+}
+
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/utilities" layer(utilities);
