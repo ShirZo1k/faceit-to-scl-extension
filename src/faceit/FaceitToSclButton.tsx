@@ -1,5 +1,20 @@
 import useTurnstileCaptcha from "./useTurnstile";
 import React, { useEffect, useRef, useState } from "react";
+
+// Inject keyframe styles once via textContent (avoids innerHTML)
+function useInjectStyles() {
+  useEffect(() => {
+    if (document.getElementById("__csn-scl-keyframes")) return;
+    const style = document.createElement("style");
+    style.id = "__csn-scl-keyframes";
+    style.textContent = `
+      @keyframes csn-shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+      @keyframes csn-gradient { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+      @keyframes csn-pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+    `;
+    document.head.appendChild(style);
+  }, []);
+}
 import {
   FaceitErrors,
   ServiceWorkerMessage,
@@ -145,6 +160,7 @@ function DemoUploadButton({
   isMultiple: boolean;
   activeFaceitId: string | undefined;
 }) {
+  useInjectStyles();
   const rawProgress = useUploadProgress(activeFaceitId);
   const displayProgress = usePerceivedProgress(
     rawProgress?.progress ?? null,
@@ -232,11 +248,6 @@ function DemoUploadButton({
             </span>
           </div>
         </div>
-        <style>{`
-          @keyframes csn-shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
-          @keyframes csn-gradient { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-          @keyframes csn-pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
-        `}</style>
         {state.error && (
           <p className="csn:mb-2 csn:text-center csn:text-xs csn:text-red-400">
             {state.error}

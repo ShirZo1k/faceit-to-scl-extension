@@ -97,14 +97,20 @@ function createContainer() {
 
   const titleEl = document.createElement("div");
   titleEl.style.cssText = `display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: ${BRAND}; letter-spacing: 0.6px; text-transform: uppercase;`;
-  titleEl.innerHTML = `
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${BRAND}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <polyline points="7 10 12 15 17 10"/>
-      <line x1="12" y1="15" x2="12" y2="3"/>
-    </svg>
-    FACEIT → SCL
-  `;
+  const titleSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  titleSvg.setAttribute("width", "14"); titleSvg.setAttribute("height", "14");
+  titleSvg.setAttribute("viewBox", "0 0 24 24"); titleSvg.setAttribute("fill", "none");
+  titleSvg.setAttribute("stroke", BRAND); titleSvg.setAttribute("stroke-width", "2.5");
+  titleSvg.setAttribute("stroke-linecap", "round"); titleSvg.setAttribute("stroke-linejoin", "round");
+  const tp1 = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  tp1.setAttribute("d", "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4");
+  const tp2 = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+  tp2.setAttribute("points", "7 10 12 15 17 10");
+  const tp3 = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  tp3.setAttribute("x1", "12"); tp3.setAttribute("y1", "15"); tp3.setAttribute("x2", "12"); tp3.setAttribute("y2", "3");
+  titleSvg.append(tp1, tp2, tp3);
+  titleEl.appendChild(titleSvg);
+  titleEl.appendChild(document.createTextNode("FACEIT \u2192 SCL"));
 
   closeBtn = document.createElement("button");
   closeBtn.className = "scl-close";
@@ -114,7 +120,15 @@ function createContainer() {
     justify-content: center; transition: background 0.15s, color 0.15s;
     display: none;
   `;
-  closeBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>`;
+  const closeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  closeSvg.setAttribute("width", "14"); closeSvg.setAttribute("height", "14");
+  closeSvg.setAttribute("viewBox", "0 0 24 24"); closeSvg.setAttribute("fill", "none");
+  closeSvg.setAttribute("stroke", "currentColor"); closeSvg.setAttribute("stroke-width", "2");
+  closeSvg.setAttribute("stroke-linecap", "round");
+  const closePath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  closePath.setAttribute("d", "M18 6L6 18M6 6l12 12");
+  closeSvg.appendChild(closePath);
+  closeBtn.appendChild(closeSvg);
   closeBtn.addEventListener("click", () => {
     if (container) {
       container.style.animation = "__scl-fade-out 0.25s ease-in forwards";
@@ -197,7 +211,7 @@ function renderEntry(entry: DemoEntry): HTMLElement {
 
 function renderAll() {
   if (!entriesEl) return;
-  entriesEl.innerHTML = "";
+  entriesEl.textContent = "";
 
   const active = [...entries.values()].filter(e => e.progress.phase !== "completed");
   const completed = [...entries.values()].filter(e => e.progress.phase === "completed");

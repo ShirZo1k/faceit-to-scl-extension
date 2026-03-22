@@ -54,39 +54,31 @@ function onDomChange() {
     div.style.padding = "0 8px";
     firstChild.appendChild(div);
 
-    div.innerHTML = `
-      <a
-        href="https://www.faceit.com/en/signin"
-        target="_blank"
-        rel="noreferrer"
-        style="
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          width: 100%;
-          height: 32px;
-          background: rgba(11, 174, 234, 0.12);
-          border: 1px solid rgba(11, 174, 234, 0.25);
-          border-radius: 4px;
-          color: #0BAEEA;
-          font-size: 12px;
-          font-weight: 700;
-          text-decoration: none;
-          transition: all 0.15s;
-          cursor: pointer;
-        "
-        onmouseover="this.style.background='rgba(11,174,234,0.2)'"
-        onmouseout="this.style.background='rgba(11,174,234,0.12)'"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
-          <polyline points="10 17 15 12 10 7"/>
-          <line x1="15" y1="12" x2="3" y2="12"/>
-        </svg>
-        Log in to FACEIT to upload to SCL
-      </a>
-    `;
+    const link = document.createElement("a");
+    link.href = "https://www.faceit.com/en/signin";
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.style.cssText = "display:flex;align-items:center;justify-content:center;gap:6px;width:100%;height:32px;background:rgba(11,174,234,0.12);border:1px solid rgba(11,174,234,0.25);border-radius:4px;color:#0BAEEA;font-size:12px;font-weight:700;text-decoration:none;transition:all 0.15s;cursor:pointer;";
+    link.addEventListener("mouseover", () => { link.style.background = "rgba(11,174,234,0.2)"; });
+    link.addEventListener("mouseout", () => { link.style.background = "rgba(11,174,234,0.12)"; });
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("width", "14"); svg.setAttribute("height", "14");
+    svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor"); svg.setAttribute("stroke-width", "2.5");
+    svg.setAttribute("stroke-linecap", "round"); svg.setAttribute("stroke-linejoin", "round");
+    const sp1 = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    sp1.setAttribute("d", "M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4");
+    const sp2 = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    sp2.setAttribute("points", "10 17 15 12 10 7");
+    const sp3 = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    sp3.setAttribute("x1", "15"); sp3.setAttribute("y1", "12");
+    sp3.setAttribute("x2", "3"); sp3.setAttribute("y2", "12");
+    svg.append(sp1, sp2, sp3);
+
+    link.appendChild(svg);
+    link.appendChild(document.createTextNode("Log in to FACEIT to upload to SCL"));
+    div.appendChild(link);
   }
 }
 
