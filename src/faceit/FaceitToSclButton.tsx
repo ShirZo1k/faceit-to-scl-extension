@@ -124,7 +124,8 @@ function useUploadProgress(faceitId: string | undefined) {
     if (!faceitId) return;
 
     function onProgress(event: Event) {
-      const detail = (event as CustomEvent).detail as UploadProgress | undefined;
+      const raw = (event as CustomEvent).detail;
+      const detail: UploadProgress | undefined = typeof raw === "string" ? JSON.parse(raw) : raw;
       if (detail && detail.faceitId === faceitId) {
         setProgress(detail);
       } else if (!detail) {

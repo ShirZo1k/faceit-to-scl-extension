@@ -22,6 +22,12 @@ import {
 
 console.log("Loaded FACEIT to SCL service worker");
 
+// Firefox MV3 event pages get terminated on idle, which breaks messaging.
+// Periodic alarm keeps the background script alive.
+if (typeof chrome.alarms !== "undefined") {
+  chrome.alarms.create("keepAlive", { periodInMinutes: 0.5 });
+}
+
 interface SclSessionTeam {
   id: string;
   organization: { id: number } | null;

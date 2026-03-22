@@ -1,6 +1,6 @@
 export default (browser) => ({
   manifest_version: 3,
-  version: "0.1.0",
+  version: "0.1.3",
   name: "FACEIT to SCL Demo Uploader",
   description: "Upload FACEIT match demos to SCL",
   browser_specific_settings:
@@ -73,7 +73,7 @@ export default (browser) => ({
   permissions:
     browser === "chrome"
       ? ["storage", "cookies"]
-      : ["storage", "cookies"],
+      : ["storage", "cookies", "alarms"],
   host_permissions: [
     "*://*.scl.gg/*",
     "*://storage.scl.gg/*",
