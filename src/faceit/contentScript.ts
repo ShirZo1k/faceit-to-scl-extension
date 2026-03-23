@@ -25,8 +25,22 @@ console.log("Loaded FACEIT to SCL extension for FACEIT injection");
         const response = await sendToBackground(event.data.payload);
         window.postMessage({ type: "fromExtension", payload: response });
       } catch (err) {
+        // "Receiving end does not exist" is expected in Firefox during concurrent
+        // uploads when the service worker event page is restarting. Retry silently.
+        const errStr = String(err);
+        if (errStr.includes("Receiving end does not exist")) {
+          console.warn("FACEIT to SCL: service worker busy, retrying...");
+          try {
+            await new Promise((r) => setTimeout(r, 2000));
+            const response = await sendToBackground(event.data.payload);
+            window.postMessage({ type: "fromExtension", payload: response });
+            return;
+          } catch {
+            // Fall through to error response
+          }
+        }
         console.error("FACEIT to SCL: failed to send message to background", err);
-        window.postMessage({ type: "fromExtension", payload: { error: String(err) } });
+        window.postMessage({ type: "fromExtension", payload: { error: errStr } });
       }
     }
   });

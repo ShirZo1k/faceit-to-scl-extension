@@ -7,8 +7,6 @@ import {
   FACEIT_ORIGINS,
   SCL_API_URL,
   SCL_STORAGE_URL,
-  MULTIPART_CHUNK_SIZE,
-  PARALLEL_UPLOADS,
   PARSING_TIMEOUT,
 } from "./constants";
 import { getProcessedDemos } from "./helpers";
@@ -23,10 +21,18 @@ import {
 console.log("Loaded FACEIT to SCL service worker");
 
 // Firefox MV3 event pages get terminated on idle, which breaks messaging.
-// Periodic alarm keeps the background script alive.
+// Periodic alarm keeps the background script alive — the listener must exist
+// or Firefox considers the worker idle despite the alarm firing.
 if (typeof chrome.alarms !== "undefined") {
   chrome.alarms.create("keepAlive", { periodInMinutes: 0.5 });
+  chrome.alarms.onAlarm.addListener(() => {
+    // No-op — just having the listener prevents idle termination
+  });
 }
+
+// Track active uploads to prevent duplicates and support cancellation
+const activeUploads = new Set<string>();
+let globalAbort = new AbortController();
 
 interface SclSessionTeam {
   id: string;
@@ -89,27 +95,36 @@ async function setProgress(
   statusText?: string,
   fileName?: string,
 ) {
-  const { [UPLOAD_PROGRESS_KEY]: existing = {} } =
-    (await chrome.storage.local.get(UPLOAD_PROGRESS_KEY)) as {
-      [UPLOAD_PROGRESS_KEY]?: UploadProgressMap;
+  try {
+    const { [UPLOAD_PROGRESS_KEY]: existing = {} } =
+      (await chrome.storage.local.get(UPLOAD_PROGRESS_KEY)) as {
+        [UPLOAD_PROGRESS_KEY]?: UploadProgressMap;
+      };
+    existing[faceitId] = {
+      faceitId,
+      progress: Math.round(progress),
+      phase,
+      statusText,
+      fileName,
     };
-  existing[faceitId] = {
-    faceitId,
-    progress: Math.round(progress),
-    phase,
-    statusText,
-    fileName,
-  };
-  await chrome.storage.local.set({ [UPLOAD_PROGRESS_KEY]: existing });
+    await chrome.storage.local.set({ [UPLOAD_PROGRESS_KEY]: existing });
+  } catch {
+    // Storage write can fail during concurrent uploads (Firefox event page lifecycle)
+    // Progress is best-effort — the upload itself continues regardless
+  }
 }
 
 async function clearProgress(faceitId: string) {
-  const { [UPLOAD_PROGRESS_KEY]: existing = {} } =
-    (await chrome.storage.local.get(UPLOAD_PROGRESS_KEY)) as {
-      [UPLOAD_PROGRESS_KEY]?: UploadProgressMap;
-    };
-  delete existing[faceitId];
-  await chrome.storage.local.set({ [UPLOAD_PROGRESS_KEY]: existing });
+  try {
+    const { [UPLOAD_PROGRESS_KEY]: existing = {} } =
+      (await chrome.storage.local.get(UPLOAD_PROGRESS_KEY)) as {
+        [UPLOAD_PROGRESS_KEY]?: UploadProgressMap;
+      };
+    delete existing[faceitId];
+    await chrome.storage.local.set({ [UPLOAD_PROGRESS_KEY]: existing });
+  } catch {
+    // Best-effort cleanup
+  }
 }
 
 // Check SCL for existing demo by FACEIT match ID
@@ -130,12 +145,12 @@ async function checkSclDemoStatus(
 }
 
 // Monitor SSE stream for parsing progress.
-// Always resolves - never blocks the upload from completing.
+// Returns true if SSE confirmed completion, false otherwise.
 async function monitorParsing(
   uploadId: string,
   faceitId: string,
   progressFn: (p: number, phase: UploadProgress["phase"], text?: string) => Promise<void>,
-): Promise<void> {
+): Promise<boolean> {
   console.log(`Monitoring parsing for uploadId: ${uploadId}`);
 
   try {
@@ -160,9 +175,7 @@ async function monitorParsing(
     if (!response.ok || !response.body) {
       console.error("SSE stream failed:", response.status);
       clearTimeout(timeout);
-      // Upload already succeeded, just mark as complete
-      await progressFn(100, "completed", "Upload complete!");
-      return;
+      return false;
     }
 
     console.log("SSE stream connected, reading events...");
@@ -200,17 +213,20 @@ async function monitorParsing(
             console.log("SSE event:", parsed.status, parsed.progress);
 
             if (parsed.status === "queued") {
-              await progressFn(92, "processing", "Queued for processing...");
+              await progressFn(91, "processing", "Queued for processing...");
             } else if (parsed.status === "extracting") {
               const p = parsed.progress ?? 0;
-              await progressFn(92 + p * 0.03, "processing", `Extracting... ${p}%`);
+              await progressFn(91 + p * 0.02, "processing", `Extracting... ${p}%`);
             } else if (parsed.status === "parsing") {
-              await progressFn(96, "processing", "Parsing demo...");
+              await progressFn(93, "processing", "Parsing demo...");
+            } else if (parsed.status === "processing") {
+              // Main processing phase: progress 0-100 maps to 93-99%
+              const p = parsed.progress ?? 0;
+              await progressFn(93 + (p / 100) * 6, "processing", `Processing... ${p}%`);
             } else if (parsed.status === "completed") {
-              await progressFn(100, "completed", "Completed!");
               clearTimeout(timeout);
               reader.cancel();
-              return;
+              return true;
             }
           } catch {
             console.log("SSE parse error for data:", data.substring(0, 100));
@@ -232,15 +248,33 @@ async function monitorParsing(
     }
   }
 
-  // If we get here without "completed", the upload is still done - just mark complete
-  await progressFn(100, "completed", "Upload complete!");
+  // SSE ended without "completed" - caller will verify via /check polling
+  return false;
 }
 
 async function uploadDemoToScl(
   demoUrl: string,
   fileName: string,
   faceitId: string,
+  signal: AbortSignal,
 ): Promise<string> {
+  // Guard: prevent duplicate uploads of the same demo
+  if (activeUploads.has(faceitId)) {
+    throw new Error("Upload already in progress for this demo");
+  }
+  activeUploads.add(faceitId);
+
+  function checkAborted() {
+    if (signal.aborted) throw new Error("Upload cancelled");
+  }
+
+  try {
+    return await doUpload();
+  } finally {
+    activeUploads.delete(faceitId);
+  }
+
+  async function doUpload(): Promise<string> {
   // 1. Check SCL session
   const session = await getSclSession();
   if (!session) {
@@ -269,6 +303,7 @@ async function uploadDemoToScl(
     setProgress(faceitId, p, phase, text, fileName);
 
   // 3. Download the demo file with progress tracking
+  checkAborted();
   console.log(`Downloading demo from: ${demoUrl}`);
   await progress(0, "download");
 
@@ -311,9 +346,10 @@ async function uploadDemoToScl(
   const fileSize = demoData.byteLength;
   console.log(`Downloaded demo: ${fileSize} bytes`);
 
-  // 4. Create multipart upload
-  console.log("Creating multipart upload on SCL...");
-  await progress( 50, "upload");
+  // 4. Create upload session
+  checkAborted();
+  console.log("Creating upload on SCL...");
+  await progress(50, "upload");
 
   const createResponse = await sclFetch(
     `${SCL_STORAGE_URL}/api/v1/media/r2/create-multipart`,
@@ -337,8 +373,8 @@ async function uploadDemoToScl(
 
   if (!createResponse.ok) {
     const errorText = await createResponse.text();
-    console.error("Failed to create multipart upload:", errorText);
-    throw new Error("Failed to create multipart upload on SCL");
+    console.error("Failed to create upload:", errorText);
+    throw new Error("Failed to create upload on SCL");
   }
 
   const createData = await createResponse.json();
@@ -348,91 +384,69 @@ async function uploadDemoToScl(
     s3UploadId: string;
   };
 
-  console.log(`Created multipart upload: key=${key}, uploadId=${uploadId}`);
+  console.log(`Created upload: key=${key}, uploadId=${uploadId}`);
 
-  // 5. Pre-sign all parts in parallel, then upload with high concurrency
-  const totalParts = Math.ceil(fileSize / MULTIPART_CHUNK_SIZE);
-  const parts: { PartNumber: number; ETag: string }[] = new Array(totalParts);
-  let completedParts = 0;
-
-  // Pre-sign all parts at once (much faster than signing one-by-one)
-  console.log(`Pre-signing ${totalParts} parts...`);
+  // 5. Sign and upload file as a single part
   await progress(51, "upload", "Preparing upload...");
 
-  const signedUrls: string[] = new Array(totalParts);
-  const signPromises = [];
-  for (let i = 0; i < totalParts; i++) {
-    const partNumber = i + 1;
-    const signParams = new URLSearchParams({
-      key,
-      uploadId: s3UploadId,
-      partNumber: String(partNumber),
-    });
+  const signParams = new URLSearchParams({
+    key,
+    uploadId: s3UploadId,
+    partNumber: "1",
+  });
 
-    signPromises.push(
-      sclFetch(
-        `${SCL_STORAGE_URL}/api/v1/media/r2/sign-part?${signParams}`,
-        {
-          headers: {
-            Origin: "https://scl.gg",
-            Referer: "https://scl.gg/",
-          },
-        },
-      ).then(async (res) => {
-        if (!res.ok) throw new Error(`Failed to sign part ${partNumber}: ${res.status}`);
-        const data = await res.json();
-        if (!data.url) throw new Error(`No signed URL for part ${partNumber}`);
-        signedUrls[i] = data.url;
-      }),
-    );
-  }
-  await Promise.all(signPromises);
-  console.log(`All ${totalParts} parts pre-signed`);
+  const signResponse = await sclFetch(
+    `${SCL_STORAGE_URL}/api/v1/media/r2/sign-part?${signParams}`,
+    {
+      headers: {
+        Origin: "https://scl.gg",
+        Referer: "https://scl.gg/",
+      },
+    },
+  );
 
-  // Upload parts using pre-signed URLs
-  async function uploadPart(partIndex: number): Promise<void> {
-    const partNumber = partIndex + 1;
-    const start = partIndex * MULTIPART_CHUNK_SIZE;
-    const end = Math.min(start + MULTIPART_CHUNK_SIZE, fileSize);
-    const chunk = demoData.slice(start, end);
+  if (!signResponse.ok) throw new Error(`Failed to sign upload: ${signResponse.status}`);
+  const signData = await signResponse.json();
+  if (!signData.url) throw new Error("No signed URL returned");
 
-    const uploadResponse = await fetch(signedUrls[partIndex], {
-      method: "PUT",
-      body: chunk,
-    });
+  checkAborted();
+  console.log("Uploading file to R2...");
 
-    if (!uploadResponse.ok) {
-      const uploadError = await uploadResponse.text();
-      throw new Error(`Failed to upload part ${partNumber}: ${uploadResponse.status} ${uploadError}`);
-    }
+  // Simulate upload progress (fetch doesn't expose upload progress in service workers)
+  let uploadDone = false;
+  const progressInterval = setInterval(async () => {
+    if (uploadDone) return;
+    // Smoothly advance from 52% to 89% based on elapsed time and file size
+    // Estimate ~20MB/s upload speed to R2
+    const elapsed = Date.now() - uploadStartTime;
+    const estimatedMs = (fileSize / (20 * 1024 * 1024)) * 1000;
+    const fraction = Math.min(elapsed / Math.max(estimatedMs, 1), 0.95);
+    await progress(52 + fraction * 37, "upload");
+  }, 500);
+  const uploadStartTime = Date.now();
 
-    const etag = uploadResponse.headers.get("ETag");
-    if (!etag) {
-      throw new Error(`No ETag returned for part ${partNumber}`);
-    }
+  const uploadResponse = await fetch(signData.url, {
+    method: "PUT",
+    body: demoData,
+  });
 
-    parts[partIndex] = { PartNumber: partNumber, ETag: etag };
-    completedParts++;
+  uploadDone = true;
+  clearInterval(progressInterval);
 
-    // Upload progress: 52% + (completed / total) * 38%
-    const uploadProgress = 52 + (completedParts / totalParts) * 38;
-    await progress(uploadProgress, "upload");
-    console.log(`Part ${partNumber}/${totalParts} uploaded`);
+  if (!uploadResponse.ok) {
+    const uploadError = await uploadResponse.text();
+    throw new Error(`Failed to upload: ${uploadResponse.status} ${uploadError}`);
   }
 
-  // Upload parts with concurrency limit
-  console.log(`Uploading ${totalParts} parts (${PARALLEL_UPLOADS} concurrent)...`);
-  for (let i = 0; i < totalParts; i += PARALLEL_UPLOADS) {
-    const batch = [];
-    for (let j = i; j < Math.min(i + PARALLEL_UPLOADS, totalParts); j++) {
-      batch.push(uploadPart(j));
-    }
-    await Promise.all(batch);
-  }
+  const etag = uploadResponse.headers.get("ETag");
+  if (!etag) throw new Error("No ETag returned from upload");
 
-  // 6. Complete multipart upload
-  console.log("Completing multipart upload...");
-  await progress( 91, "processing", "Finalizing upload...");
+  await progress(90, "upload");
+  console.log("File uploaded to R2");
+
+  // 6. Complete upload
+  console.log("Completing upload...");
+  await progress(91, "processing", "Finalizing upload...");
 
   const completeResponse = await sclFetch(
     `${SCL_STORAGE_URL}/api/v1/media/r2/complete-multipart`,
@@ -449,7 +463,7 @@ async function uploadDemoToScl(
         key,
         libraryType,
         organizationId,
-        parts,
+        parts: [{ PartNumber: 1, ETag: etag }],
         s3UploadId,
         teamId,
         uploadId,
@@ -459,17 +473,40 @@ async function uploadDemoToScl(
 
   if (!completeResponse.ok) {
     const errorText = await completeResponse.text();
-    console.error("Failed to complete multipart upload:", errorText);
-    throw new Error("Failed to complete multipart upload on SCL");
+    console.error("Failed to complete upload:", errorText);
+    throw new Error("Failed to complete upload on SCL");
   }
 
   console.log(`Upload complete, monitoring parsing for ${uploadId}...`);
 
   // 7. Monitor SSE parsing progress
-  await monitorParsing(uploadId, faceitId, progress);
+  const sseConfirmed = await monitorParsing(uploadId, faceitId, progress);
 
+  // 8. If SSE didn't confirm completion, fall back to polling /check endpoint
+  // (SSE is authoritative for direct uploads; /check works for FACEIT pipeline imports)
+  if (!sseConfirmed) {
+    const faceitMatch = faceitId.match(/^(.+)_map(\d+)$/);
+    if (faceitMatch) {
+      const [, matchId, mapNumStr] = faceitMatch;
+      const mapIndex = parseInt(mapNumStr, 10) - 1; // _map1 → index 0
+      const CHECK_POLL_INTERVAL = 1_000;
+      const CHECK_POLL_TIMEOUT = 60_000;
+      const pollStart = Date.now();
+
+      await progress(99, "processing", "Verifying demo is ready...");
+
+      while (Date.now() - pollStart < CHECK_POLL_TIMEOUT) {
+        const status = await checkSclDemoStatus(matchId, mapIndex);
+        if (status.status === "completed") break;
+        await new Promise((r) => setTimeout(r, CHECK_POLL_INTERVAL));
+      }
+    }
+  }
+
+  await progress(100, "completed", "Upload complete!");
   console.log(`Successfully uploaded and parsed demo on SCL: ${uploadId}`);
   return uploadId;
+  } // end doUpload
 }
 
 async function onMessage(
@@ -490,7 +527,7 @@ async function onMessage(
           urlPath.split("/").pop() ?? `${faceitId}.dem.zst`;
 
         console.log(`Uploading demo for FACEIT match ${faceitId} to SCL`);
-        const sclUploadId = await uploadDemoToScl(url, fileName, faceitId);
+        const sclUploadId = await uploadDemoToScl(url, fileName, faceitId, globalAbort.signal);
 
         const processedMatches = await getProcessedDemos();
         if (
@@ -533,6 +570,16 @@ async function onMessage(
       case ServiceWorkerMessageType.CHECK_SCL_STATUS: {
         const { matchId, mapIndex } = request.payload;
         return await checkSclDemoStatus(matchId, mapIndex);
+      }
+
+      case ServiceWorkerMessageType.CANCEL_UPLOADS: {
+        console.log("Cancelling all active uploads");
+        globalAbort.abort();
+        globalAbort = new AbortController();
+        // Clear all progress entries
+        await chrome.storage.local.set({ [UPLOAD_PROGRESS_KEY]: {} });
+        activeUploads.clear();
+        return { cancelled: true };
       }
     }
   } catch (error) {

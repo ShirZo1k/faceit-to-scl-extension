@@ -82,7 +82,7 @@ function updateDialog(status: string, mapId?: string) {
     const span = document.createElement("span");
     const textNode = document.createTextNode(`${label} — click `);
     const strong = document.createElement("strong");
-    strong.textContent = "Retry";
+    strong.textContent = "View Demo";
     const textNode2 = document.createTextNode(" to play");
     span.appendChild(textNode);
     span.appendChild(strong);
@@ -96,7 +96,8 @@ function updateDialog(status: string, mapId?: string) {
 
     const buttons = dialog.querySelectorAll("button");
     buttons.forEach((btn) => {
-      if (btn.textContent?.trim() === "Retry") {
+      const text = btn.textContent?.trim();
+      if (text === "View Demo" || text === "Retry") {
         btn.style.backgroundColor = "rgb(34 197 94)";
         btn.style.color = "white";
         btn.style.borderColor = "rgb(34 197 94)";

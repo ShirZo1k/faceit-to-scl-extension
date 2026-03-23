@@ -291,6 +291,7 @@ export default function FaceitToSclButton() {
   const [activeFaceitIds, setActiveFaceitIds] = useState<Record<number, string>>({});
   const [globalError, setGlobalError] = useState<string>();
   const [showToast, setShowToast] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   function updateDemoState(index: number, update: Partial<DemoUploadState>) {
     setDemoStates((prev) => ({
@@ -421,6 +422,29 @@ export default function FaceitToSclButton() {
     }
   }
 
+  async function handleCancelAll() {
+    await sendMessage({
+      type: ServiceWorkerMessageType.CANCEL_UPLOADS,
+      payload: {},
+    } satisfies ServiceWorkerMessage);
+    // Reset all demo states that are loading
+    setDemoStates((prev) => {
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        const k = Number(key);
+        if (next[k]?.loading) {
+          next[k] = { ...next[k], loading: false, error: "Cancelled" };
+        }
+      }
+      return next;
+    });
+    setShowCancelConfirm(false);
+  }
+
+  const hasActiveUploads = Object.values(demoStates).some(
+    (s) => s.loading && !s.uploaded,
+  );
+
   useEffect(() => {
     if (showToast) {
       const timeout = setTimeout(() => setShowToast(false), 5_000);
@@ -446,6 +470,39 @@ export default function FaceitToSclButton() {
           activeFaceitId={activeFaceitIds[demo.index]}
         />
       ))}
+
+      {/* Cancel button — visible during active uploads */}
+      {hasActiveUploads && !showCancelConfirm && (
+        <button
+          className="csn:mt-1 csn:mb-2 csn:block csn:w-full csn:cursor-pointer csn:rounded-sm csn:border csn:border-red-500/30 csn:bg-red-500/10 csn:px-4 csn:py-1.5 csn:text-center csn:text-xs csn:font-semibold csn:text-red-400 csn:transition-all csn:hover:bg-red-500/20"
+          onClick={() => setShowCancelConfirm(true)}
+        >
+          ✕ Cancel all uploads
+        </button>
+      )}
+
+      {/* Cancel confirmation */}
+      {showCancelConfirm && (
+        <div className="csn:mt-1 csn:mb-2 csn:rounded-sm csn:border csn:border-red-500/30 csn:bg-red-500/10 csn:p-3 csn:text-center">
+          <p className="csn:m-0 csn:mb-2 csn:text-xs csn:font-semibold csn:text-red-400">
+            Cancel all uploads? Demos that haven't finished will need to be re-uploaded.
+          </p>
+          <div className="csn:flex csn:gap-2 csn:justify-center">
+            <button
+              className="csn:cursor-pointer csn:rounded-sm csn:border-0 csn:bg-red-500 csn:px-4 csn:py-1 csn:text-xs csn:font-bold csn:text-white csn:transition-all csn:hover:bg-red-600"
+              onClick={handleCancelAll}
+            >
+              Yes, cancel
+            </button>
+            <button
+              className="csn:cursor-pointer csn:rounded-sm csn:border csn:border-white/20 csn:bg-transparent csn:px-4 csn:py-1 csn:text-xs csn:font-bold csn:text-white/60 csn:transition-all csn:hover:bg-white/10"
+              onClick={() => setShowCancelConfirm(false)}
+            >
+              Keep uploading
+            </button>
+          </div>
+        </div>
+      )}
 
       {showToast && (
         <FaceitToast>

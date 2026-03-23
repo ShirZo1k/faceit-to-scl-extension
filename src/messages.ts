@@ -7,6 +7,7 @@ export enum ServiceWorkerMessageType {
   SEND_TO_SCL = "SEND_TO_SCL",
   GET_PROCESSED_DEMO = "GET_PROCESSED_DEMO",
   CHECK_SCL_STATUS = "CHECK_SCL_STATUS",
+  CANCEL_UPLOADS = "CANCEL_UPLOADS",
 }
 
 export type ServiceWorkerMessage =
@@ -21,6 +22,10 @@ export type ServiceWorkerMessage =
   | Action<
       ServiceWorkerMessageType.CHECK_SCL_STATUS,
       { matchId: string; mapIndex: number }
+    >
+  | Action<
+      ServiceWorkerMessageType.CANCEL_UPLOADS,
+      Record<string, never>
     >;
 
 export enum FaceitErrors {

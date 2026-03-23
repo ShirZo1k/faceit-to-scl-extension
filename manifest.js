@@ -1,6 +1,6 @@
 export default (browser) => ({
   manifest_version: 3,
-  version: "0.1.3",
+  version: "0.1.6",
   name: "FACEIT to SCL Demo Uploader",
   description: "Upload FACEIT match demos to SCL",
   browser_specific_settings:
